@@ -19,6 +19,7 @@ export interface AuthResponse {
   access_token: string;
   token_type: string;
   user: AuthUser;
+  offline?: boolean;
 }
 
 export function isNativeApp(): boolean {
@@ -73,6 +74,10 @@ export function getBiometricUser(): AuthUser | null {
   }
 }
 
+export function getOfflineFallbackUser(): AuthUser | null {
+  return getBiometricUser() ?? getStoredUser();
+}
+
 export function getAuthHeaders(): Record<string, string> {
   const token = getStoredToken();
   return token ? { Authorization: `Bearer ${token}` } : {};
@@ -112,35 +117,86 @@ export async function loginWithPassword(
   identifier: string,
   password: string
 ): Promise<AuthResponse> {
-  const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier, password }),
-  });
+  try {
+    const res = await fetch(`${API_BASE_URL}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ identifier, password }),
+    });
 
-  if (!res.ok) {
-    throw new Error(await parseErrorDetail(res, 'Credenciales incorrectas'));
+    if (!res.ok) {
+      throw new Error(await parseErrorDetail(res, 'Credenciales incorrectas'));
+    }
+
+    const data = (await res.json()) as AuthResponse;
+    saveSession(data.access_token, data.user, true);
+    return data;
+  } catch (err) {
+    const cachedUser = getOfflineFallbackUser();
+    const cachedToken = localStorage.getItem(BIO_TOKEN_KEY) || getStoredToken() || 'offline-session';
+    const normalized = identifier.trim().toLowerCase();
+    const matchesCached =
+      cachedUser &&
+      (!normalized ||
+        cachedUser.username.toLowerCase() === normalized ||
+        cachedUser.email.toLowerCase() === normalized);
+
+    if (matchesCached && cachedUser) {
+      saveSession(cachedToken, cachedUser, isNativeApp());
+      return {
+        access_token: cachedToken,
+        token_type: 'bearer',
+        user: cachedUser,
+        offline: true,
+      };
+    }
+
+    if (err instanceof TypeError || !navigator.onLine) {
+      throw new Error(
+        'Sin conexión al servidor. Si ya iniciaste sesión antes en este equipo, usa el acceso sin conexión.'
+      );
+    }
+    throw err;
   }
+}
 
-  const data = (await res.json()) as AuthResponse;
-  saveSession(data.access_token, data.user, true);
-  return data;
+export async function loginOfflineCached(): Promise<AuthResponse> {
+  const cachedUser = getOfflineFallbackUser();
+  if (!cachedUser) {
+    throw new Error('No hay una sesión guardada en este dispositivo para entrar sin conexión.');
+  }
+  const cachedToken = localStorage.getItem(BIO_TOKEN_KEY) || getStoredToken() || 'offline-session';
+  saveSession(cachedToken, cachedUser, isNativeApp());
+  return {
+    access_token: cachedToken,
+    token_type: 'bearer',
+    user: cachedUser,
+    offline: true,
+  };
 }
 
 export async function fetchCurrentUser(token?: string): Promise<AuthUser | null> {
   const activeToken = token ?? getStoredToken();
   if (!activeToken) return null;
 
-  const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
-    headers: { Authorization: `Bearer ${activeToken}` },
-  });
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${activeToken}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
 
-  if (!res.ok) {
-    return null;
+    if (!res.ok) {
+      return null;
+    }
+
+    const data = await res.json();
+    return (data?.user as AuthUser) ?? null;
+  } catch {
+    return getStoredUser();
   }
-
-  const data = await res.json();
-  return (data?.user as AuthUser) ?? null;
 }
 
 export async function canUseBiometricLogin(): Promise<boolean> {
@@ -178,16 +234,58 @@ export async function loginWithBiometrics(): Promise<AuthResponse> {
     allowDeviceCredential: true,
   });
 
-  const verifiedUser = await fetchCurrentUser(bioToken);
-  if (!verifiedUser) {
-    clearBiometricSession();
-    throw new Error('La sesión guardada expiró. Inicia sesión con usuario y contraseña');
+  if (!navigator.onLine) {
+    saveSession(bioToken, bioUser, true);
+    return {
+      access_token: bioToken,
+      token_type: 'bearer',
+      user: bioUser,
+      offline: true,
+    };
   }
 
-  saveSession(bioToken, verifiedUser, true);
-  return {
-    access_token: bioToken,
-    token_type: 'bearer',
-    user: verifiedUser,
-  };
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 3500);
+    const res = await fetch(`${API_BASE_URL}/api/auth/me`, {
+      headers: { Authorization: `Bearer ${bioToken}` },
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (res.status === 401 || res.status === 403) {
+      clearBiometricSession();
+      throw new Error('La sesión guardada expiró. Inicia sesión con usuario y contraseña');
+    }
+
+    if (!res.ok) {
+      saveSession(bioToken, bioUser, true);
+      return {
+        access_token: bioToken,
+        token_type: 'bearer',
+        user: bioUser,
+        offline: true,
+      };
+    }
+
+    const data = await res.json();
+    const verifiedUser = (data?.user as AuthUser) ?? bioUser;
+    saveSession(bioToken, verifiedUser, true);
+    return {
+      access_token: bioToken,
+      token_type: 'bearer',
+      user: verifiedUser,
+    };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('expiró')) {
+      throw err;
+    }
+    saveSession(bioToken, bioUser, true);
+    return {
+      access_token: bioToken,
+      token_type: 'bearer',
+      user: bioUser,
+      offline: true,
+    };
+  }
 }

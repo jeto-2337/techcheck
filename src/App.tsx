@@ -23,6 +23,7 @@ import {
   getPendingQueue,
   loadLocalRecords,
   saveLocalRecords,
+  loadVerifiedRecommendations,
   submitAnalysis,
   syncPendingQueue,
   fetchRemoteAnalyses,
@@ -78,6 +79,7 @@ export function App() {
   const [statusBanner, setStatusBanner] = useState<string | null>(null);
 
   const [records, setRecords] = useState<AnalysisRecord[]>(() => loadLocalRecords());
+  const [verifiedRecommendations] = useState<AnalysisRecord[]>(() => loadVerifiedRecommendations());
   const [selectedId, setSelectedId] = useState<string | null>(() => {
     const initial = loadLocalRecords().find((r) => !r.deletedAt);
     return initial ? initial.id : null;

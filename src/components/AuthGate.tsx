@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
-import { Fingerprint, KeyRound, Mail, User, UserPlus } from 'lucide-react';
+import { Fingerprint, KeyRound, Mail, User, UserPlus, WifiOff } from 'lucide-react';
 import {
   type AuthUser,
   canUseBiometricLogin,
   getBiometricUser,
+  getOfflineFallbackUser,
   isNativeApp,
+  loginOfflineCached,
   loginWithBiometrics,
   loginWithPassword,
   registerUser,
@@ -24,6 +26,8 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
   const [bioLoading, setBioLoading] = useState(false);
   const [bioAvailable, setBioAvailable] = useState(false);
   const [bioUser, setBioUser] = useState<AuthUser | null>(null);
+  const [cachedUser, setCachedUser] = useState<AuthUser | null>(null);
+  const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
   const [error, setError] = useState<string | null>(null);
 
   const native = isNativeApp();
@@ -31,11 +35,20 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
   useEffect(() => {
     let active = true;
     setBioUser(getBiometricUser());
+    setCachedUser(getOfflineFallbackUser());
     canUseBiometricLogin().then((ok) => {
       if (active) setBioAvailable(ok);
     });
+
+    const handleOnline = () => setIsOnline(true);
+    const handleOffline = () => setIsOnline(false);
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
     return () => {
       active = false;
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
     };
   }, [mode]);
 
@@ -71,6 +84,19 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
     }
   };
 
+  const handleOfflineEntry = async () => {
+    setError(null);
+    setLoading(true);
+    try {
+      const res = await loginOfflineCached();
+      onAuthenticated(res.user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo entrar sin conexión');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center bg-slate-950 text-slate-100 p-4">
       <div className="w-full max-w-md rounded-2xl bg-slate-900 border border-slate-800 p-6 shadow-xl space-y-5">
@@ -79,6 +105,12 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           <p className="text-sm text-slate-400">
             {native ? 'Acceso con huella o cuenta' : 'Inicia sesión o crea tu cuenta'}
           </p>
+          {!isOnline && (
+            <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-500/15 text-amber-300 border border-amber-500/30 text-xs mt-1">
+              <WifiOff className="w-3.5 h-3.5" />
+              Modo sin conexión activo
+            </div>
+          )}
         </div>
 
         <div className="grid grid-cols-2 gap-2 bg-slate-950 p-1 rounded-xl border border-slate-800">
@@ -133,6 +165,18 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
               <div className="flex-grow border-t border-slate-800" />
             </div>
           </div>
+        )}
+
+        {cachedUser && mode === 'login' && (!isOnline || !native) && (
+          <button
+            type="button"
+            onClick={handleOfflineEntry}
+            disabled={loading || bioLoading}
+            className="w-full py-2.5 px-4 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <WifiOff className="w-4 h-4" />
+            Entrar sin conexión como @{cachedUser.username}
+          </button>
         )}
 
         <form onSubmit={handleSubmit} className="space-y-4">
