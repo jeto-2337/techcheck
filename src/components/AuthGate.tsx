@@ -7,6 +7,7 @@ import {
   getOfflineFallbackUser,
   isNativeApp,
   loginOfflineCached,
+  loginGuestOffline,
   loginWithBiometrics,
   loginWithPassword,
   registerUser,
@@ -176,6 +177,31 @@ export const AuthGate: React.FC<AuthGateProps> = ({ onAuthenticated }) => {
           >
             <WifiOff className="w-4 h-4" />
             Entrar sin conexión como @{cachedUser.username}
+          </button>
+        )}
+
+                {mode === 'login' && (
+          <button
+            type="button"
+            onClick={async () => {
+              setError(null);
+              setLoading(true);
+              try {
+                const res = cachedUser ? await loginOfflineCached() : await loginGuestOffline();
+                onAuthenticated(res.user);
+              } catch (err) {
+                setError(err instanceof Error ? err.message : 'No se pudo entrar sin conexión');
+              } finally {
+                setLoading(false);
+              }
+            }}
+            disabled={loading || bioLoading}
+            className="w-full py-2.5 px-4 rounded-xl bg-amber-500/15 hover:bg-amber-500/25 border border-amber-500/30 text-amber-200 text-xs font-medium flex items-center justify-center gap-2 transition cursor-pointer"
+          >
+            <WifiOff className="w-4 h-4" />
+            {cachedUser
+              ? `Entrar sin conexión como @${cachedUser.username}`
+              : 'Continuar sin conexión (Modo local)'}
           </button>
         )}
 

@@ -160,6 +160,34 @@ export async function loginWithPassword(
   }
 }
 
+export async function loginGuestOffline(): Promise<AuthResponse> {
+  const existing = getOfflineFallbackUser();
+  if (existing) {
+    const token = localStorage.getItem(BIO_TOKEN_KEY) || getStoredToken() || 'offline-session';
+    saveSession(token, existing, isNativeApp());
+    return {
+      access_token: token,
+      token_type: 'bearer',
+      user: existing,
+      offline: true,
+    };
+  }
+
+  const guestUser: AuthUser = {
+    id: 0,
+    username: 'invitado_offline',
+    email: 'offline@techcheck.local',
+    role: 'user',
+  };
+  saveSession('offline-guest-token', guestUser, false);
+  return {
+    access_token: 'offline-guest-token',
+    token_type: 'bearer',
+    user: guestUser,
+    offline: true,
+  };
+}
+
 export async function loginOfflineCached(): Promise<AuthResponse> {
   const cachedUser = getOfflineFallbackUser();
   if (!cachedUser) {
