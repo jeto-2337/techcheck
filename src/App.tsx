@@ -723,6 +723,40 @@ export function App() {
                 </select>
               </div>
 
+              <div className="rounded-xl bg-slate-950/70 border border-slate-800 p-3.5 mb-4 space-y-2">
+                <div className="flex items-center justify-between gap-2">
+                  <h2 className="text-xs font-semibold uppercase tracking-wider text-emerald-300 flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4" />
+                    Noticias y guías verificadas (Offline)
+                  </h2>
+                  <span className="text-[11px] text-slate-400">
+                    {verifiedRecommendations.length} guardadas
+                  </span>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {verifiedRecommendations.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => {
+                        setRecords((prev) =>
+                          prev.some((r) => r.id === item.id) ? prev : [item, ...prev]
+                        );
+                        setSelectedId(item.id);
+                      }}
+                      className="text-left p-2.5 rounded-lg bg-slate-900 hover:bg-slate-800/80 border border-slate-800 transition cursor-pointer space-y-1"
+                    >
+                      <div className="text-xs font-medium text-slate-100 line-clamp-1">
+                        {item.title}
+                      </div>
+                      <p className="text-[11px] text-slate-400 line-clamp-2">
+                        {item.summary}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {visibleRecords.length === 0 ? (
                 <div className="text-center py-8 text-sm text-slate-400">
                   No hay registros en esta vista todavía.
